@@ -11,7 +11,7 @@
 
 KPG 193 is a **synthetic Korean power grid test system** developed by the [AGM Center](https://agm.kentech.ac.kr/) at [KENTECH](https://www.kentech.ac.kr/) from publicly available Korean energy data. It provides a standardized 193-bus representation of the Korean transmission network for reproducible power system studies.
 
-KPG 193 is part of the [**KPG Test System**](https://agm.kentech.ac.kr/documentation/kpg-test-system/) module in the [**KPG (Korean Power Grid) Platform**](https://agm.kentech.ac.kr/documentation/introduction/). It is designed to work with [**KPG Run**](https://agm.kentech.ac.kr/documentation/kpg-run/user-interface/) for ED, UC, DC-OPF, and AC-OPF studies, and with [**KPG View**](https://agm.kentech.ac.kr/documentation/kpg-view/overview/) for map-based visualization.
+KPG 193 is part of the [**KPG Test System**](https://agm.kentech.ac.kr/docs/kpg-test-system/) module in the [**KPG (Korean Power Grid) Platform**](https://agm.kentech.ac.kr/docs/introduction/). It is designed to work with [**KPG Run**](https://agm.kentech.ac.kr/docs/kpg-run/user-interface/) for ED, UC, DC-OPF, and AC-OPF studies, and with [**KPG View**](https://agm.kentech.ac.kr/docs/kpg-view/overview/) for map-based visualization.
 
 The dataset supports research on decarbonization, optimal power flow, resource adequacy, reliability, and renewable energy integration. It is released under the Open Database License (ODbL 1.0) to support transparent and reproducible research.
 
@@ -218,7 +218,7 @@ If you use the KPG 193 test system in your work, please cite:
 
 ## Documentation
 
-For documentation, tutorials, and additional resources, visit the [AGM Center Documentation](https://agm.kentech.ac.kr/documentation/kpg-test-system/).
+For documentation, tutorials, and additional resources, visit the [AGM Center Documentation](https://agm.kentech.ac.kr/docs/kpg-test-system/).
 
 ## License
 
