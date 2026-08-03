@@ -1,0 +1,2 @@
+﻿outage_branch,outage_from_bus,outage_from_name,outage_to_bus,outage_to_name,outage_base_loading_pct,status,component_count,component_sizes,converged,max_loading_pct,worst_branch,worst_from_bus,worst_from_name,worst_to_bus,worst_to_name,overloaded_branch_count,min_voltage_pu,min_voltage_bus,min_voltage_name,voltage_violation_count,max_voltage_violation_pu,ac_loss_mw,message
+67,28,양평,80,태백,52.006808878524744,LIMIT_VIOLATION,1,,True,230.03211325868767,170,82,울진,86,영주,29,0.7317410189573957,67,양구,31,0.18298651781441055,2828.1640107742423,

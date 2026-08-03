@@ -1,0 +1,873 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KPG-193 N-1 사고 분석</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f4f7fb;
+      --panel: #ffffff;
+      --panel-soft: #f7f9fc;
+      --text: #182231;
+      --muted: #617087;
+      --border: #d7deea;
+      --grid: #aab5c5;
+      --bus: #52657d;
+      --outage: #7c3aed;
+      --worst: #dc2626;
+      --voltage: #d97706;
+      --ok: #15803d;
+      --warning: #b45309;
+      --danger: #b91c1c;
+      --shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0e1521;
+        --panel: #151f2e;
+        --panel-soft: #111a27;
+        --text: #e8eef7;
+        --muted: #aab7ca;
+        --border: #314057;
+        --grid: #586880;
+        --bus: #9aa9bd;
+        --outage: #a78bfa;
+        --worst: #fb7185;
+        --voltage: #fbbf24;
+        --ok: #4ade80;
+        --warning: #fbbf24;
+        --danger: #fb7185;
+        --shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family:
+        Pretendard, "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+    }
+
+    button,
+    select {
+      font: inherit;
+    }
+
+    .page {
+      width: min(1500px, 100%);
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .heading {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    h1 {
+      margin: 0 0 5px;
+      font-size: clamp(24px, 3vw, 36px);
+      font-weight: 700;
+    }
+
+    .subtitle {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .control-panel {
+      display: grid;
+      grid-template-columns: minmax(150px, 0.7fr) minmax(280px, 2fr) auto auto;
+      gap: 10px;
+      padding: 14px;
+      margin-bottom: 14px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .field {
+      min-width: 0;
+    }
+
+    .field label {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    select,
+    button {
+      min-height: 42px;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: var(--panel-soft);
+      color: var(--text);
+    }
+
+    select {
+      width: 100%;
+      padding: 0 11px;
+    }
+
+    button {
+      align-self: end;
+      padding: 0 16px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      border-color: var(--grid);
+    }
+
+    button:focus-visible,
+    select:focus-visible {
+      outline: 3px solid color-mix(in srgb, var(--outage) 45%, transparent);
+      outline-offset: 2px;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .stat {
+      min-width: 0;
+      padding: 15px 17px;
+      border: 1px solid var(--border);
+      border-radius: 13px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .stat-label {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .stat-value {
+      margin-top: 6px;
+      overflow: hidden;
+      font-size: clamp(20px, 2.5vw, 29px);
+      font-weight: 700;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 2.2fr) minmax(300px, 0.9fr);
+      gap: 14px;
+      align-items: start;
+    }
+
+    .map-panel,
+    .detail-panel {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .map-panel {
+      padding: 12px;
+    }
+
+    #network-map {
+      display: block;
+      width: 100%;
+      height: min(72vh, 840px);
+      min-height: 540px;
+      border-radius: 10px;
+      background:
+        radial-gradient(circle at 50% 40%, var(--panel-soft), var(--panel));
+    }
+
+    .base-branch {
+      stroke: var(--grid);
+      stroke-width: 0.7;
+      opacity: 0.42;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .base-bus {
+      fill: var(--bus);
+      opacity: 0.68;
+    }
+
+    .outage-line {
+      stroke: var(--outage);
+      stroke-width: 5;
+      stroke-dasharray: 10 6;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .worst-line {
+      stroke: var(--worst);
+      stroke-width: 5;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .voltage-bus {
+      fill: var(--voltage);
+      stroke: var(--panel);
+      stroke-width: 3;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .map-label {
+      fill: var(--text);
+      paint-order: stroke;
+      stroke: var(--panel);
+      stroke-width: 4px;
+      stroke-linejoin: round;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 9px 18px;
+      padding: 10px 4px 2px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .swatch {
+      width: 25px;
+      height: 4px;
+      border-radius: 4px;
+      background: var(--grid);
+    }
+
+    .swatch.outage {
+      background: var(--outage);
+    }
+
+    .swatch.worst {
+      background: var(--worst);
+    }
+
+    .swatch.voltage {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--voltage);
+    }
+
+    .detail-panel {
+      padding: 18px;
+    }
+
+    .detail-panel h2 {
+      margin: 0 0 6px;
+      font-size: 21px;
+    }
+
+    .status-line {
+      margin-bottom: 17px;
+      font-weight: 700;
+    }
+
+    .status-ok {
+      color: var(--ok);
+    }
+
+    .status-warning {
+      color: var(--warning);
+    }
+
+    .status-danger {
+      color: var(--danger);
+    }
+
+    dl {
+      margin: 0;
+    }
+
+    .detail-row {
+      display: grid;
+      grid-template-columns: 125px minmax(0, 1fr);
+      gap: 12px;
+      padding: 11px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .detail-row:last-child {
+      border-bottom: 0;
+    }
+
+    dt {
+      color: var(--muted);
+    }
+
+    dd {
+      min-width: 0;
+      margin: 0;
+      overflow-wrap: anywhere;
+      font-weight: 600;
+    }
+
+    .note {
+      margin: 16px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    @media (max-width: 900px) {
+      .control-panel {
+        grid-template-columns: 1fr 2fr;
+      }
+
+      .stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      #network-map {
+        height: 680px;
+      }
+    }
+
+    @media (max-width: 580px) {
+      .page {
+        padding: 14px;
+      }
+
+      .heading {
+        display: block;
+      }
+
+      .control-panel {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .field.scenario-field {
+        grid-column: 1 / -1;
+      }
+
+      .stats {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .stat {
+        padding: 13px;
+      }
+
+      #network-map {
+        height: 560px;
+        min-height: 500px;
+      }
+
+      .detail-row {
+        grid-template-columns: 105px minmax(0, 1fr);
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="heading">
+      <div>
+        <h1>KPG-193 N-1 사고 분석</h1>
+        <p class="subtitle">AC Branch 탈락 사고 385건의 정적 AC 조류계산 결과</p>
+      </div>
+    </header>
+
+    <section class="control-panel" aria-label="사고 선택">
+      <div class="field">
+        <label for="status-filter">상태 필터</label>
+        <select id="status-filter">
+          <option value="ALL">전체</option>
+          <option value="LIMIT_VIOLATION">한계 위반</option>
+          <option value="ISLANDING">계통 분리</option>
+          <option value="OK">한계 내</option>
+          <option value="NON_CONVERGED">비수렴</option>
+          <option value="ERROR">오류</option>
+        </select>
+      </div>
+
+      <div class="field scenario-field">
+        <label for="scenario-select">Branch 탈락 사고</label>
+        <select id="scenario-select"></select>
+      </div>
+
+      <button id="prev-button" type="button">이전</button>
+      <button id="next-button" type="button">다음</button>
+    </section>
+
+    <section class="stats" aria-label="선택 사고 요약">
+      <article class="stat">
+        <div class="stat-label">사고 상태</div>
+        <div class="stat-value" id="metric-status">-</div>
+      </article>
+      <article class="stat">
+        <div class="stat-label">사고 후 최대 부하율</div>
+        <div class="stat-value" id="metric-loading">-</div>
+      </article>
+      <article class="stat">
+        <div class="stat-label">사고 후 최저 전압</div>
+        <div class="stat-value" id="metric-voltage">-</div>
+      </article>
+      <article class="stat">
+        <div class="stat-label">한계 위반</div>
+        <div class="stat-value" id="metric-violations">-</div>
+      </article>
+    </section>
+
+    <section class="layout">
+      <div class="map-panel">
+        <svg id="network-map" viewBox="0 0 780 900" role="img"
+             aria-label="KPG-193 계통과 선택한 사고 위치">
+          <g id="base-branches"></g>
+          <g id="base-buses"></g>
+          <g id="highlights"></g>
+          <g id="labels"></g>
+        </svg>
+
+        <div class="legend" aria-label="지도 범례">
+          <span class="legend-item"><span class="swatch"></span>기존 계통</span>
+          <span class="legend-item"><span class="swatch outage"></span>탈락 선로</span>
+          <span class="legend-item"><span class="swatch worst"></span>사고 후 최대 부하 선로</span>
+          <span class="legend-item"><span class="swatch voltage"></span>최저전압 Bus</span>
+        </div>
+      </div>
+
+      <aside class="detail-panel">
+        <h2 id="detail-title">-</h2>
+        <div class="status-line" id="detail-status">-</div>
+        <dl>
+          <div class="detail-row">
+            <dt>사고 전 부하율</dt>
+            <dd id="detail-base-loading">-</dd>
+          </div>
+          <div class="detail-row">
+            <dt>최대 부하 선로</dt>
+            <dd id="detail-worst-branch">-</dd>
+          </div>
+          <div class="detail-row">
+            <dt>과부하 선로</dt>
+            <dd id="detail-overloads">-</dd>
+          </div>
+          <div class="detail-row">
+            <dt>최저전압 Bus</dt>
+            <dd id="detail-min-voltage">-</dd>
+          </div>
+          <div class="detail-row">
+            <dt>전압 위반 Bus</dt>
+            <dd id="detail-voltage-violations">-</dd>
+          </div>
+          <div class="detail-row">
+            <dt>계통 분리</dt>
+            <dd id="detail-islanding">-</dd>
+          </div>
+          <div class="detail-row">
+            <dt>AC 손실</dt>
+            <dd id="detail-loss">-</dd>
+          </div>
+        </dl>
+        <p class="note">
+          CSV에는 각 사고의 대표 결과가 저장되므로 지도에는 탈락 선로,
+          최대 부하 선로와 최저전압 Bus를 표시합니다. 계통 분리 사고는
+          단일 Slack AC-PF를 생략했기 때문에 사고 후 전압·부하율이 없습니다.
+        </p>
+      </aside>
+    </section>
+  </main>
+
+  <script>
+    "use strict";
+
+    const DATA = {"buses":[{"id":1,"name":"철원","latitude":38.1476054,"longitude":127.302627,"base_kv":154.0},{"id":2,"name":"연천","latitude":38.0155011,"longitude":127.0712073,"base_kv":345.0},{"id":3,"name":"포천","latitude":37.8903061,"longitude":127.1952799,"base_kv":345.0},{"id":4,"name":"동두천","latitude":37.8892659,"longitude":127.0574671,"base_kv":345.0},{"id":5,"name":"가평","latitude":37.8339742,"longitude":127.5105312,"base_kv":154.0},{"id":6,"name":"강화","latitude":37.7427185,"longitude":126.4981355,"base_kv":154.0},{"id":7,"name":"경기북부","latitude":37.7368222,"longitude":127.0820244,"base_kv":345.0},{"id":8,"name":"파주","latitude":37.7294666,"longitude":126.7588877,"base_kv":345.0},{"id":9,"name":"노원도봉","latitude":37.6539176,"longitude":127.0556668,"base_kv":154.0},{"id":10,"name":"고양","latitude":37.6415246,"longitude":126.787805,"base_kv":154.0},{"id":11,"name":"김포","latitude":37.6392059,"longitude":126.6811981,"base_kv":345.0},{"id":12,"name":"강북성북","latitude":37.6305681,"longitude":127.0249447,"base_kv":154.0},{"id":13,"name":"동대문중랑","latitude":37.6074444,"longitude":127.0791618,"base_kv":154.0},{"id":14,"name":"서대문은평","latitude":37.6053447,"longitude":126.933673,"base_kv":345.0},{"id":15,"name":"구리","latitude":37.5978157,"longitude":127.1347986,"base_kv":154.0},{"id":16,"name":"남양주","latitude":37.5960136,"longitude":127.1741195,"base_kv":345.0},{"id":17,"name":"광진성동","latitude":37.567708,"longitude":127.0340591,"base_kv":345.0},{"id":18,"name":"서울","latitude":37.5652217,"longitude":126.9832853,"base_kv":345.0},{"id":19,"name":"마포용산","latitude":37.5418771,"longitude":126.9465978,"base_kv":345.0},{"id":20,"name":"하남","latitude":37.5355966,"longitude":127.227846,"base_kv":154.0},{"id":21,"name":"서인천","latitude":37.5338753,"longitude":126.6449679,"base_kv":345.0},{"id":22,"name":"강동송파","latitude":37.5238222,"longitude":127.1355704,"base_kv":345.0},{"id":23,"name":"남서울","latitude":37.5201646,"longitude":126.8928588,"base_kv":345.0},{"id":24,"name":"강서양천","latitude":37.5197369,"longitude":126.8688415,"base_kv":154.0},{"id":25,"name":"인천","latitude":37.5168001,"longitude":126.7275198,"base_kv":154.0},{"id":26,"name":"부천","latitude":37.507079,"longitude":126.7863724,"base_kv":345.0},{"id":27,"name":"영종","latitude":37.4894849,"longitude":126.5002177,"base_kv":345.0},{"id":28,"name":"양평","latitude":37.4872312,"longitude":127.4811936,"base_kv":765.0},{"id":29,"name":"강남","latitude":37.4869344,"longitude":127.0334941,"base_kv":345.0},{"id":30,"name":"서초","latitude":37.4856988,"longitude":127.0279981,"base_kv":154.0},{"id":31,"name":"관악동작","latitude":37.4781083,"longitude":126.9811097,"base_kv":154.0},{"id":32,"name":"광명","latitude":37.4770417,"longitude":126.8660242,"base_kv":345.0},{"id":33,"name":"구로금천","latitude":37.4722139,"longitude":126.8976898,"base_kv":154.0},{"id":34,"name":"제물포","latitude":37.4693214,"longitude":126.6602658,"base_kv":345.0},{"id":35,"name":"시흥","latitude":37.4467266,"longitude":126.8032345,"base_kv":154.0},{"id":36,"name":"성남","latitude":37.4443903,"longitude":127.1305195,"base_kv":345.0},{"id":37,"name":"남인천","latitude":37.4250107,"longitude":126.6682817,"base_kv":345.0},{"id":38,"name":"광주","latitude":37.4055498,"longitude":127.2595176,"base_kv":345.0},{"id":39,"name":"안양","latitude":37.3838862,"longitude":126.9472815,"base_kv":154.0},{"id":40,"name":"안산","latitude":37.3205935,"longitude":126.827539,"base_kv":345.0},{"id":41,"name":"여주","latitude":37.2894137,"longitude":127.6350458,"base_kv":154.0},{"id":42,"name":"이천","latitude":37.2832499,"longitude":127.4473318,"base_kv":154.0},{"id":43,"name":"경기","latitude":37.2774786,"longitude":127.0294786,"base_kv":154.0},{"id":44,"name":"서수원","latitude":37.2581477,"longitude":126.9692066,"base_kv":345.0},{"id":45,"name":"서용인","latitude":37.2581195,"longitude":127.1141296,"base_kv":345.0},{"id":46,"name":"동용인","latitude":37.2346559,"longitude":127.2056971,"base_kv":345.0},{"id":47,"name":"화성","latitude":37.2062516,"longitude":126.7716263,"base_kv":345.0},{"id":48,"name":"오산","latitude":37.135409,"longitude":127.0724671,"base_kv":154.0},{"id":49,"name":"서평택","latitude":37.0189007,"longitude":126.9162141,"base_kv":154.0},{"id":50,"name":"안성","latitude":37.0079405,"longitude":127.2642685,"base_kv":765.0},{"id":51,"name":"평택","latitude":36.9912891,"longitude":127.1073892,"base_kv":345.0},{"id":52,"name":"음성","latitude":36.9343927,"longitude":127.6953281,"base_kv":154.0},{"id":53,"name":"당진","latitude":36.8870577,"longitude":126.6403163,"base_kv":765.0},{"id":54,"name":"진천","latitude":36.8540755,"longitude":127.435928,"base_kv":345.0},{"id":55,"name":"천안","latitude":36.8264525,"longitude":127.1314313,"base_kv":345.0},{"id":56,"name":"증평괴산","latitude":36.7890676,"longitude":127.5880688,"base_kv":154.0},{"id":57,"name":"아산","latitude":36.7876783,"longitude":127.0078012,"base_kv":345.0},{"id":58,"name":"서산","latitude":36.7749838,"longitude":126.4542918,"base_kv":345.0},{"id":59,"name":"태안","latitude":36.7472915,"longitude":126.2989917,"base_kv":345.0},{"id":60,"name":"예산","latitude":36.6886775,"longitude":126.8433622,"base_kv":345.0},{"id":61,"name":"동청주","latitude":36.6482024,"longitude":127.4868526,"base_kv":154.0},{"id":62,"name":"충북","latitude":36.6152516,"longitude":127.4505384,"base_kv":765.0},{"id":63,"name":"홍성","latitude":36.6024768,"longitude":126.6523497,"base_kv":765.0},{"id":64,"name":"세종","latitude":36.4910403,"longitude":127.3037974,"base_kv":345.0},{"id":65,"name":"속초고성","latitude":38.211761,"longitude":128.5905534,"base_kv":154.0},{"id":66,"name":"화천","latitude":38.1109325,"longitude":127.7078886,"base_kv":154.0},{"id":67,"name":"양구","latitude":38.1083094,"longitude":127.9861374,"base_kv":154.0},{"id":68,"name":"양양","latitude":38.0722354,"longitude":128.6177014,"base_kv":345.0},{"id":69,"name":"인제","latitude":38.065981,"longitude":128.1662155,"base_kv":154.0},{"id":70,"name":"강원","latitude":37.8841012,"longitude":127.7515791,"base_kv":154.0},{"id":71,"name":"강릉","latitude":37.782175,"longitude":128.91881,"base_kv":345.0},{"id":72,"name":"홍천","latitude":37.6854547,"longitude":127.8772733,"base_kv":154.0},{"id":73,"name":"동해","latitude":37.5257024,"longitude":129.1079441,"base_kv":345.0},{"id":74,"name":"횡성","latitude":37.4889479,"longitude":127.9828042,"base_kv":154.0},{"id":75,"name":"삼척","latitude":37.4343249,"longitude":129.1779432,"base_kv":345.0},{"id":76,"name":"정선","latitude":37.380063,"longitude":128.6504248,"base_kv":154.0},{"id":77,"name":"원주","latitude":37.3728881,"longitude":127.9382723,"base_kv":154.0},{"id":78,"name":"평창","latitude":37.3706367,"longitude":128.4036121,"base_kv":154.0},{"id":79,"name":"영월","latitude":37.1710591,"longitude":128.4787543,"base_kv":154.0},{"id":80,"name":"태백","latitude":37.158431,"longitude":128.9869811,"base_kv":765.0},{"id":81,"name":"제천","latitude":37.1392858,"longitude":128.2066643,"base_kv":345.0},{"id":82,"name":"울진","latitude":36.9889644,"longitude":129.3949525,"base_kv":765.0},{"id":83,"name":"단양","latitude":36.9866896,"longitude":128.3675379,"base_kv":154.0},{"id":84,"name":"충주","latitude":36.9800022,"longitude":127.9163821,"base_kv":345.0},{"id":85,"name":"봉화","latitude":36.8861246,"longitude":128.7414472,"base_kv":154.0},{"id":86,"name":"영주","latitude":36.8244885,"longitude":128.6220788,"base_kv":345.0},{"id":87,"name":"예천","latitude":36.6611743,"longitude":128.4608929,"base_kv":345.0},{"id":88,"name":"영양","latitude":36.6597467,"longitude":129.1110463,"base_kv":154.0},{"id":89,"name":"문경","latitude":36.5878187,"longitude":128.1897318,"base_kv":154.0},{"id":90,"name":"경북","latitude":36.5525762,"longitude":128.7328845,"base_kv":154.0},{"id":91,"name":"보은","latitude":36.4810593,"longitude":127.7121993,"base_kv":154.0},{"id":92,"name":"청송","latitude":36.4360411,"longitude":129.0528372,"base_kv":345.0},{"id":93,"name":"상주","latitude":36.4195462,"longitude":128.1492358,"base_kv":154.0},{"id":94,"name":"영덕","latitude":36.4113658,"longitude":129.3752987,"base_kv":154.0},{"id":95,"name":"의성","latitude":36.3486262,"longitude":128.6737337,"base_kv":345.0},{"id":96,"name":"공주","latitude":36.4535516,"longitude":127.1340966,"base_kv":154.0},{"id":97,"name":"청양","latitude":36.4447748,"longitude":126.7987398,"base_kv":345.0},{"id":98,"name":"대전세종충남","latitude":36.359899,"longitude":127.4347396,"base_kv":154.0},{"id":99,"name":"대덕유성","latitude":36.3526702,"longitude":127.3429771,"base_kv":154.0},{"id":100,"name":"보령","latitude":36.3376329,"longitude":126.6231707,"base_kv":345.0},{"id":101,"name":"서대전","latitude":36.3285382,"longitude":127.3732048,"base_kv":154.0},{"id":102,"name":"옥천","latitude":36.3042072,"longitude":127.5671475,"base_kv":345.0},{"id":103,"name":"부여","latitude":36.2832042,"longitude":126.9304461,"base_kv":154.0},{"id":104,"name":"논산","latitude":36.1925903,"longitude":127.1001148,"base_kv":345.0},{"id":105,"name":"금산","latitude":36.1074145,"longitude":127.4831885,"base_kv":154.0},{"id":106,"name":"서천","latitude":36.0135454,"longitude":126.6972483,"base_kv":154.0},{"id":107,"name":"무주","latitude":36.0084587,"longitude":127.6539817,"base_kv":345.0},{"id":108,"name":"군산","latitude":35.9918727,"longitude":126.7097813,"base_kv":345.0},{"id":109,"name":"익산","latitude":35.9617034,"longitude":127.0046179,"base_kv":345.0},{"id":110,"name":"전북","latitude":35.846396,"longitude":127.1496214,"base_kv":154.0},{"id":111,"name":"김제","latitude":35.7998592,"longitude":126.8995714,"base_kv":345.0},{"id":112,"name":"진안","latitude":35.7894402,"longitude":127.4219239,"base_kv":154.0},{"id":113,"name":"남전주","latitude":35.7868869,"longitude":127.1305519,"base_kv":154.0},{"id":114,"name":"부안","latitude":35.7379884,"longitude":126.7341292,"base_kv":154.0},{"id":115,"name":"장수","latitude":35.6448002,"longitude":127.5179628,"base_kv":154.0},{"id":116,"name":"임실","latitude":35.6204419,"longitude":127.2859375,"base_kv":154.0},{"id":117,"name":"정읍","latitude":35.569177,"longitude":126.8436756,"base_kv":154.0},{"id":118,"name":"고창","latitude":35.4252935,"longitude":126.6951147,"base_kv":154.0},{"id":119,"name":"남원","latitude":35.416354,"longitude":127.3869149,"base_kv":345.0},{"id":120,"name":"순창","latitude":35.370988,"longitude":127.1511991,"base_kv":154.0},{"id":121,"name":"장성","latitude":35.3112113,"longitude":126.7965808,"base_kv":154.0},{"id":122,"name":"담양","latitude":35.3093444,"longitude":126.9840302,"base_kv":154.0},{"id":123,"name":"곡성","latitude":35.2775962,"longitude":127.2911363,"base_kv":154.0},{"id":124,"name":"영광","latitude":35.2732643,"longitude":126.5036994,"base_kv":345.0},{"id":125,"name":"구례","latitude":35.1980957,"longitude":127.4633506,"base_kv":154.0},{"id":126,"name":"광주전남","latitude":35.1849938,"longitude":126.9065991,"base_kv":345.0},{"id":127,"name":"서광주","latitude":35.1514663,"longitude":126.8910386,"base_kv":154.0},{"id":128,"name":"광산","latitude":35.1473089,"longitude":126.7898299,"base_kv":154.0},{"id":129,"name":"함평","latitude":35.0602742,"longitude":126.5184791,"base_kv":154.0},{"id":130,"name":"화순","latitude":35.056059,"longitude":126.9791792,"base_kv":345.0},{"id":131,"name":"나주","latitude":35.0179817,"longitude":126.7133244,"base_kv":154.0},{"id":132,"name":"무안","latitude":34.9916794,"longitude":126.4710728,"base_kv":154.0},{"id":133,"name":"순천","latitude":34.969474,"longitude":127.4862135,"base_kv":345.0},{"id":134,"name":"광양","latitude":34.9398248,"longitude":127.6911817,"base_kv":345.0},{"id":135,"name":"목포","latitude":34.8034534,"longitude":126.4094598,"base_kv":154.0},{"id":136,"name":"영암","latitude":34.800676,"longitude":126.6950883,"base_kv":345.0},{"id":137,"name":"여수","latitude":34.7661708,"longitude":127.7040008,"base_kv":345.0},{"id":138,"name":"보성","latitude":34.7623836,"longitude":127.0725961,"base_kv":154.0},{"id":139,"name":"신안","latitude":34.7547881,"longitude":126.1258283,"base_kv":154.0},{"id":140,"name":"장흥","latitude":34.6785624,"longitude":126.9088733,"base_kv":154.0},{"id":141,"name":"강진","latitude":34.6350795,"longitude":126.7778068,"base_kv":154.0},{"id":142,"name":"고흥","latitude":34.6171976,"longitude":127.292276,"base_kv":154.0},{"id":143,"name":"해남","latitude":34.5718736,"longitude":126.6093297,"base_kv":154.0},{"id":144,"name":"진도","latitude":34.4816926,"longitude":126.2611809,"base_kv":154.0},{"id":145,"name":"완도","latitude":34.3167296,"longitude":126.7462849,"base_kv":154.0},{"id":146,"name":"군위","latitude":36.2381588,"longitude":128.5664163,"base_kv":154.0},{"id":147,"name":"영동","latitude":36.1664543,"longitude":127.7672096,"base_kv":154.0},{"id":148,"name":"김천","latitude":36.1268576,"longitude":128.1197655,"base_kv":154.0},{"id":149,"name":"구미","latitude":36.1178498,"longitude":128.3500525,"base_kv":345.0},{"id":150,"name":"북포항","latitude":36.1136567,"longitude":129.3476427,"base_kv":345.0},{"id":151,"name":"포항","latitude":36.0105934,"longitude":129.3476465,"base_kv":345.0},{"id":152,"name":"칠곡","latitude":35.9825138,"longitude":128.3947963,"base_kv":345.0},{"id":153,"name":"영천","latitude":35.9565703,"longitude":128.9311391,"base_kv":154.0},{"id":154,"name":"성주","latitude":35.9308092,"longitude":128.2996123,"base_kv":154.0},{"id":155,"name":"대구","latitude":35.8865906,"longitude":128.5835863,"base_kv":154.0},{"id":156,"name":"동대구","latitude":35.874943,"longitude":128.6409753,"base_kv":154.0},{"id":157,"name":"서대구","latitude":35.8699046,"longitude":128.5702802,"base_kv":154.0},{"id":158,"name":"경주","latitude":35.8546331,"longitude":129.2249442,"base_kv":154.0},{"id":159,"name":"경산","latitude":35.8233624,"longitude":128.7387814,"base_kv":345.0},{"id":160,"name":"남대구","latitude":35.8037443,"longitude":128.493177,"base_kv":154.0},{"id":161,"name":"고령","latitude":35.723972,"longitude":128.2643709,"base_kv":345.0},{"id":162,"name":"거창","latitude":35.6869976,"longitude":127.9237166,"base_kv":154.0},{"id":163,"name":"청도","latitude":35.6399837,"longitude":128.7483704,"base_kv":345.0},{"id":164,"name":"합천","latitude":35.570517,"longitude":128.1631123,"base_kv":154.0},{"id":165,"name":"서울산","latitude":35.5576859,"longitude":129.1127764,"base_kv":345.0},{"id":166,"name":"동울산","latitude":35.5574128,"longitude":129.3595736,"base_kv":345.0},{"id":167,"name":"울산","latitude":35.5416431,"longitude":129.3249546,"base_kv":345.0},{"id":168,"name":"창녕","latitude":35.5367842,"longitude":128.5007601,"base_kv":765.0},{"id":169,"name":"함양","latitude":35.5266968,"longitude":127.7289933,"base_kv":154.0},{"id":170,"name":"밀양","latitude":35.4734316,"longitude":128.7649554,"base_kv":154.0},{"id":171,"name":"산청","latitude":35.4133242,"longitude":127.8749111,"base_kv":345.0},{"id":172,"name":"양산","latitude":35.3538289,"longitude":129.0471722,"base_kv":154.0},{"id":173,"name":"의령","latitude":35.3193117,"longitude":128.2566547,"base_kv":345.0},{"id":174,"name":"함안","latitude":35.2744788,"longitude":128.3987678,"base_kv":345.0},{"id":175,"name":"기장","latitude":35.2344076,"longitude":129.2196368,"base_kv":765.0},{"id":176,"name":"마산","latitude":35.2322317,"longitude":128.5364256,"base_kv":345.0},{"id":177,"name":"경남","latitude":35.2317245,"longitude":128.6890297,"base_kv":345.0},{"id":178,"name":"김해","latitude":35.2276497,"longitude":128.8889606,"base_kv":154.0},{"id":179,"name":"동래","latitude":35.196844,"longitude":129.1049123,"base_kv":345.0},{"id":180,"name":"진주","latitude":35.1807228,"longitude":128.1219249,"base_kv":154.0},{"id":181,"name":"북부산","latitude":35.1687476,"longitude":128.9898279,"base_kv":345.0},{"id":182,"name":"서부산","latitude":35.167323,"longitude":128.9568626,"base_kv":345.0},{"id":183,"name":"진해","latitude":35.1637947,"longitude":128.6611743,"base_kv":345.0},{"id":184,"name":"남부산","latitude":35.1601792,"longitude":129.1447624,"base_kv":345.0},{"id":185,"name":"부산울산","latitude":35.1526224,"longitude":129.0613592,"base_kv":154.0},{"id":186,"name":"중부산","latitude":35.0993232,"longitude":129.0232228,"base_kv":345.0},{"id":187,"name":"영도","latitude":35.0880552,"longitude":129.0362927,"base_kv":345.0},{"id":188,"name":"하동","latitude":35.0646945,"longitude":127.7456133,"base_kv":154.0},{"id":189,"name":"고성","latitude":34.9727632,"longitude":128.3256539,"base_kv":154.0},{"id":190,"name":"사천","latitude":34.9314571,"longitude":128.0812632,"base_kv":345.0},{"id":191,"name":"거제","latitude":34.8899811,"longitude":128.6180426,"base_kv":154.0},{"id":192,"name":"통영","latitude":34.8823395,"longitude":128.4167527,"base_kv":154.0},{"id":193,"name":"남해","latitude":34.8515466,"longitude":127.8942976,"base_kv":345.0}],"branches":[{"id":1,"from_bus":1,"to_bus":2,"rate_a":904.0,"in_service":true},{"id":2,"from_bus":1,"to_bus":3,"rate_a":904.0,"in_service":true},{"id":3,"from_bus":1,"to_bus":66,"rate_a":904.0,"in_service":true},{"id":4,"from_bus":2,"to_bus":3,"rate_a":2172.0,"in_service":true},{"id":5,"from_bus":2,"to_bus":4,"rate_a":904.0,"in_service":true},{"id":6,"from_bus":2,"to_bus":6,"rate_a":904.0,"in_service":true},{"id":7,"from_bus":3,"to_bus":4,"rate_a":2172.0,"in_service":true},{"id":8,"from_bus":3,"to_bus":7,"rate_a":904.0,"in_service":true},{"id":9,"from_bus":3,"to_bus":28,"rate_a":2172.0,"in_service":true},{"id":10,"from_bus":4,"to_bus":7,"rate_a":904.0,"in_service":true},{"id":11,"from_bus":4,"to_bus":8,"rate_a":2172.0,"in_service":true},{"id":12,"from_bus":5,"to_bus":16,"rate_a":904.0,"in_service":true},{"id":13,"from_bus":5,"to_bus":20,"rate_a":904.0,"in_service":true},{"id":14,"from_bus":5,"to_bus":66,"rate_a":904.0,"in_service":true},{"id":15,"from_bus":5,"to_bus":70,"rate_a":904.0,"in_service":true},{"id":16,"from_bus":6,"to_bus":8,"rate_a":904.0,"in_service":true},{"id":17,"from_bus":6,"to_bus":11,"rate_a":904.0,"in_service":true},{"id":18,"from_bus":7,"to_bus":9,"rate_a":904.0,"in_service":true},{"id":19,"from_bus":7,"to_bus":14,"rate_a":2172.0,"in_service":true},{"id":20,"from_bus":7,"to_bus":28,"rate_a":2172.0,"in_service":true},{"id":21,"from_bus":8,"to_bus":10,"rate_a":1416.0,"in_service":true},{"id":22,"from_bus":8,"to_bus":11,"rate_a":2172.0,"in_service":true},{"id":23,"from_bus":8,"to_bus":14,"rate_a":2172.0,"in_service":true},{"id":24,"from_bus":9,"to_bus":12,"rate_a":708.0,"in_service":true},{"id":25,"from_bus":9,"to_bus":13,"rate_a":708.0,"in_service":true},{"id":26,"from_bus":9,"to_bus":15,"rate_a":708.0,"in_service":true},{"id":27,"from_bus":10,"to_bus":14,"rate_a":904.0,"in_service":true},{"id":28,"from_bus":10,"to_bus":24,"rate_a":1416.0,"in_service":true},{"id":29,"from_bus":11,"to_bus":21,"rate_a":2172.0,"in_service":true},{"id":30,"from_bus":11,"to_bus":25,"rate_a":904.0,"in_service":true},{"id":31,"from_bus":12,"to_bus":14,"rate_a":904.0,"in_service":true},{"id":32,"from_bus":12,"to_bus":18,"rate_a":708.0,"in_service":true},{"id":33,"from_bus":13,"to_bus":16,"rate_a":904.0,"in_service":true},{"id":34,"from_bus":13,"to_bus":17,"rate_a":708.0,"in_service":true},{"id":35,"from_bus":13,"to_bus":22,"rate_a":904.0,"in_service":true},{"id":36,"from_bus":14,"to_bus":18,"rate_a":1416.0,"in_service":true},{"id":37,"from_bus":14,"to_bus":19,"rate_a":1906.0,"in_service":true},{"id":38,"from_bus":14,"to_bus":23,"rate_a":708.0,"in_service":true},{"id":39,"from_bus":15,"to_bus":16,"rate_a":708.0,"in_service":true},{"id":40,"from_bus":16,"to_bus":17,"rate_a":5718.0,"in_service":true},{"id":41,"from_bus":16,"to_bus":20,"rate_a":904.0,"in_service":true},{"id":42,"from_bus":16,"to_bus":22,"rate_a":1906.0,"in_service":true},{"id":43,"from_bus":16,"to_bus":28,"rate_a":4344.0,"in_service":true},{"id":44,"from_bus":17,"to_bus":18,"rate_a":3812.0,"in_service":true},{"id":45,"from_bus":18,"to_bus":19,"rate_a":2832.0,"in_service":true},{"id":46,"from_bus":18,"to_bus":30,"rate_a":904.0,"in_service":true},{"id":47,"from_bus":19,"to_bus":23,"rate_a":2832.0,"in_service":true},{"id":48,"from_bus":20,"to_bus":22,"rate_a":904.0,"in_service":true},{"id":49,"from_bus":21,"to_bus":25,"rate_a":904.0,"in_service":true},{"id":50,"from_bus":21,"to_bus":34,"rate_a":2172.0,"in_service":true},{"id":51,"from_bus":22,"to_bus":29,"rate_a":1416.0,"in_service":true},{"id":52,"from_bus":22,"to_bus":36,"rate_a":2172.0,"in_service":true},{"id":53,"from_bus":22,"to_bus":38,"rate_a":2172.0,"in_service":true},{"id":54,"from_bus":22,"to_bus":46,"rate_a":2172.0,"in_service":true},{"id":55,"from_bus":23,"to_bus":24,"rate_a":2712.0,"in_service":true},{"id":56,"from_bus":23,"to_bus":32,"rate_a":1906.0,"in_service":true},{"id":57,"from_bus":23,"to_bus":33,"rate_a":708.0,"in_service":true},{"id":58,"from_bus":24,"to_bus":26,"rate_a":1416.0,"in_service":true},{"id":59,"from_bus":25,"to_bus":26,"rate_a":904.0,"in_service":true},{"id":60,"from_bus":25,"to_bus":34,"rate_a":904.0,"in_service":true},{"id":61,"from_bus":26,"to_bus":32,"rate_a":904.0,"in_service":true},{"id":62,"from_bus":26,"to_bus":34,"rate_a":1906.0,"in_service":true},{"id":63,"from_bus":27,"to_bus":34,"rate_a":4344.0,"in_service":true},{"id":64,"from_bus":28,"to_bus":38,"rate_a":904.0,"in_service":true},{"id":65,"from_bus":28,"to_bus":41,"rate_a":904.0,"in_service":true},{"id":66,"from_bus":28,"to_bus":50,"rate_a":7290.0,"in_service":true},{"id":67,"from_bus":28,"to_bus":80,"rate_a":14580.0,"in_service":true},{"id":68,"from_bus":29,"to_bus":30,"rate_a":1416.0,"in_service":true},{"id":69,"from_bus":29,"to_bus":36,"rate_a":1906.0,"in_service":true},{"id":70,"from_bus":30,"to_bus":31,"rate_a":904.0,"in_service":true},{"id":71,"from_bus":31,"to_bus":33,"rate_a":708.0,"in_service":true},{"id":72,"from_bus":31,"to_bus":36,"rate_a":904.0,"in_service":true},{"id":73,"from_bus":32,"to_bus":33,"rate_a":1062.0,"in_service":true},{"id":74,"from_bus":32,"to_bus":37,"rate_a":2172.0,"in_service":true},{"id":75,"from_bus":32,"to_bus":44,"rate_a":2172.0,"in_service":true},{"id":76,"from_bus":34,"to_bus":37,"rate_a":2172.0,"in_service":true},{"id":77,"from_bus":35,"to_bus":37,"rate_a":904.0,"in_service":true},{"id":78,"from_bus":35,"to_bus":40,"rate_a":904.0,"in_service":true},{"id":79,"from_bus":36,"to_bus":38,"rate_a":904.0,"in_service":true},{"id":80,"from_bus":36,"to_bus":43,"rate_a":904.0,"in_service":true},{"id":81,"from_bus":36,"to_bus":44,"rate_a":2172.0,"in_service":true},{"id":82,"from_bus":36,"to_bus":46,"rate_a":2172.0,"in_service":true},{"id":83,"from_bus":37,"to_bus":40,"rate_a":4344.0,"in_service":true},{"id":84,"from_bus":38,"to_bus":42,"rate_a":904.0,"in_service":true},{"id":85,"from_bus":38,"to_bus":45,"rate_a":904.0,"in_service":true},{"id":86,"from_bus":38,"to_bus":46,"rate_a":904.0,"in_service":true},{"id":87,"from_bus":38,"to_bus":84,"rate_a":2172.0,"in_service":true},{"id":88,"from_bus":39,"to_bus":44,"rate_a":1808.0,"in_service":true},{"id":89,"from_bus":40,"to_bus":44,"rate_a":2172.0,"in_service":true},{"id":90,"from_bus":40,"to_bus":47,"rate_a":2172.0,"in_service":true},{"id":91,"from_bus":41,"to_bus":42,"rate_a":904.0,"in_service":true},{"id":92,"from_bus":41,"to_bus":52,"rate_a":904.0,"in_service":true},{"id":93,"from_bus":41,"to_bus":77,"rate_a":904.0,"in_service":true},{"id":94,"from_bus":42,"to_bus":46,"rate_a":904.0,"in_service":true},{"id":95,"from_bus":42,"to_bus":84,"rate_a":904.0,"in_service":true},{"id":96,"from_bus":43,"to_bus":44,"rate_a":904.0,"in_service":true},{"id":97,"from_bus":44,"to_bus":48,"rate_a":904.0,"in_service":true},{"id":98,"from_bus":44,"to_bus":57,"rate_a":2172.0,"in_service":true},{"id":99,"from_bus":45,"to_bus":46,"rate_a":2172.0,"in_service":true},{"id":100,"from_bus":45,"to_bus":50,"rate_a":2172.0,"in_service":true},{"id":101,"from_bus":46,"to_bus":48,"rate_a":904.0,"in_service":true},{"id":102,"from_bus":46,"to_bus":50,"rate_a":2172.0,"in_service":true},{"id":103,"from_bus":47,"to_bus":49,"rate_a":904.0,"in_service":true},{"id":104,"from_bus":47,"to_bus":60,"rate_a":2172.0,"in_service":true},{"id":105,"from_bus":48,"to_bus":49,"rate_a":904.0,"in_service":true},{"id":106,"from_bus":48,"to_bus":51,"rate_a":904.0,"in_service":true},{"id":107,"from_bus":49,"to_bus":51,"rate_a":1356.0,"in_service":true},{"id":108,"from_bus":49,"to_bus":53,"rate_a":904.0,"in_service":true},{"id":109,"from_bus":50,"to_bus":51,"rate_a":2172.0,"in_service":true},{"id":110,"from_bus":50,"to_bus":54,"rate_a":2172.0,"in_service":true},{"id":111,"from_bus":50,"to_bus":62,"rate_a":14580.0,"in_service":true},{"id":112,"from_bus":51,"to_bus":55,"rate_a":904.0,"in_service":true},{"id":113,"from_bus":51,"to_bus":57,"rate_a":904.0,"in_service":true},{"id":114,"from_bus":52,"to_bus":54,"rate_a":904.0,"in_service":true},{"id":115,"from_bus":52,"to_bus":56,"rate_a":904.0,"in_service":true},{"id":116,"from_bus":52,"to_bus":84,"rate_a":904.0,"in_service":true},{"id":117,"from_bus":53,"to_bus":55,"rate_a":4344.0,"in_service":true},{"id":118,"from_bus":53,"to_bus":58,"rate_a":2172.0,"in_service":true},{"id":119,"from_bus":53,"to_bus":63,"rate_a":14580.0,"in_service":true},{"id":120,"from_bus":54,"to_bus":55,"rate_a":904.0,"in_service":true},{"id":121,"from_bus":54,"to_bus":61,"rate_a":904.0,"in_service":true},{"id":122,"from_bus":54,"to_bus":62,"rate_a":2172.0,"in_service":true},{"id":123,"from_bus":55,"to_bus":57,"rate_a":2172.0,"in_service":true},{"id":124,"from_bus":55,"to_bus":64,"rate_a":904.0,"in_service":true},{"id":125,"from_bus":56,"to_bus":61,"rate_a":904.0,"in_service":true},{"id":126,"from_bus":57,"to_bus":60,"rate_a":904.0,"in_service":true},{"id":127,"from_bus":57,"to_bus":97,"rate_a":2172.0,"in_service":true},{"id":128,"from_bus":58,"to_bus":59,"rate_a":6516.0,"in_service":true},{"id":129,"from_bus":58,"to_bus":63,"rate_a":4344.0,"in_service":true},{"id":130,"from_bus":60,"to_bus":63,"rate_a":2172.0,"in_service":true},{"id":131,"from_bus":60,"to_bus":100,"rate_a":2172.0,"in_service":true},{"id":132,"from_bus":61,"to_bus":62,"rate_a":1808.0,"in_service":true},{"id":133,"from_bus":62,"to_bus":63,"rate_a":14580.0,"in_service":true},{"id":134,"from_bus":62,"to_bus":64,"rate_a":2172.0,"in_service":true},{"id":135,"from_bus":63,"to_bus":97,"rate_a":904.0,"in_service":true},{"id":136,"from_bus":64,"to_bus":96,"rate_a":904.0,"in_service":true},{"id":137,"from_bus":64,"to_bus":98,"rate_a":904.0,"in_service":true},{"id":138,"from_bus":64,"to_bus":99,"rate_a":904.0,"in_service":true},{"id":139,"from_bus":64,"to_bus":102,"rate_a":4344.0,"in_service":true},{"id":140,"from_bus":65,"to_bus":68,"rate_a":904.0,"in_service":true},{"id":141,"from_bus":65,"to_bus":69,"rate_a":904.0,"in_service":true},{"id":142,"from_bus":66,"to_bus":67,"rate_a":904.0,"in_service":true},{"id":143,"from_bus":66,"to_bus":70,"rate_a":904.0,"in_service":true},{"id":144,"from_bus":67,"to_bus":69,"rate_a":904.0,"in_service":true},{"id":145,"from_bus":68,"to_bus":69,"rate_a":904.0,"in_service":true},{"id":146,"from_bus":68,"to_bus":71,"rate_a":2172.0,"in_service":true},{"id":147,"from_bus":69,"to_bus":72,"rate_a":904.0,"in_service":true},{"id":148,"from_bus":70,"to_bus":72,"rate_a":904.0,"in_service":true},{"id":149,"from_bus":71,"to_bus":73,"rate_a":2172.0,"in_service":true},{"id":150,"from_bus":71,"to_bus":78,"rate_a":904.0,"in_service":true},{"id":151,"from_bus":72,"to_bus":74,"rate_a":904.0,"in_service":true},{"id":152,"from_bus":73,"to_bus":75,"rate_a":2172.0,"in_service":true},{"id":153,"from_bus":73,"to_bus":76,"rate_a":904.0,"in_service":true},{"id":154,"from_bus":73,"to_bus":79,"rate_a":904.0,"in_service":true},{"id":155,"from_bus":73,"to_bus":80,"rate_a":904.0,"in_service":true},{"id":156,"from_bus":73,"to_bus":81,"rate_a":2172.0,"in_service":true},{"id":157,"from_bus":74,"to_bus":77,"rate_a":904.0,"in_service":true},{"id":158,"from_bus":74,"to_bus":78,"rate_a":904.0,"in_service":true},{"id":159,"from_bus":75,"to_bus":82,"rate_a":2172.0,"in_service":true},{"id":160,"from_bus":76,"to_bus":79,"rate_a":904.0,"in_service":true},{"id":161,"from_bus":77,"to_bus":81,"rate_a":904.0,"in_service":true},{"id":162,"from_bus":78,"to_bus":81,"rate_a":904.0,"in_service":true},{"id":163,"from_bus":79,"to_bus":80,"rate_a":904.0,"in_service":true},{"id":164,"from_bus":79,"to_bus":81,"rate_a":904.0,"in_service":true},{"id":165,"from_bus":79,"to_bus":83,"rate_a":904.0,"in_service":true},{"id":166,"from_bus":80,"to_bus":82,"rate_a":14580.0,"in_service":true},{"id":167,"from_bus":81,"to_bus":84,"rate_a":1808.0,"in_service":true},{"id":168,"from_bus":81,"to_bus":86,"rate_a":2172.0,"in_service":true},{"id":169,"from_bus":82,"to_bus":85,"rate_a":904.0,"in_service":true},{"id":170,"from_bus":82,"to_bus":86,"rate_a":2172.0,"in_service":true},{"id":171,"from_bus":82,"to_bus":94,"rate_a":904.0,"in_service":true},{"id":172,"from_bus":83,"to_bus":89,"rate_a":904.0,"in_service":true},{"id":173,"from_bus":85,"to_bus":86,"rate_a":904.0,"in_service":true},{"id":174,"from_bus":86,"to_bus":87,"rate_a":2172.0,"in_service":true},{"id":175,"from_bus":86,"to_bus":89,"rate_a":904.0,"in_service":true},{"id":176,"from_bus":86,"to_bus":90,"rate_a":904.0,"in_service":true},{"id":177,"from_bus":86,"to_bus":92,"rate_a":2172.0,"in_service":true},{"id":178,"from_bus":87,"to_bus":90,"rate_a":904.0,"in_service":true},{"id":179,"from_bus":87,"to_bus":95,"rate_a":2172.0,"in_service":true},{"id":180,"from_bus":88,"to_bus":92,"rate_a":904.0,"in_service":true},{"id":181,"from_bus":88,"to_bus":94,"rate_a":904.0,"in_service":true},{"id":182,"from_bus":89,"to_bus":93,"rate_a":904.0,"in_service":true},{"id":183,"from_bus":90,"to_bus":92,"rate_a":904.0,"in_service":true},{"id":184,"from_bus":91,"to_bus":147,"rate_a":904.0,"in_service":true},{"id":185,"from_bus":92,"to_bus":95,"rate_a":2172.0,"in_service":true},{"id":186,"from_bus":93,"to_bus":102,"rate_a":904.0,"in_service":true},{"id":187,"from_bus":93,"to_bus":149,"rate_a":904.0,"in_service":true},{"id":188,"from_bus":94,"to_bus":150,"rate_a":904.0,"in_service":true},{"id":189,"from_bus":95,"to_bus":146,"rate_a":904.0,"in_service":true},{"id":190,"from_bus":95,"to_bus":150,"rate_a":2172.0,"in_service":true},{"id":191,"from_bus":95,"to_bus":152,"rate_a":904.0,"in_service":true},{"id":192,"from_bus":96,"to_bus":97,"rate_a":904.0,"in_service":true},{"id":193,"from_bus":96,"to_bus":103,"rate_a":904.0,"in_service":true},{"id":194,"from_bus":97,"to_bus":100,"rate_a":4344.0,"in_service":true},{"id":195,"from_bus":97,"to_bus":102,"rate_a":2172.0,"in_service":true},{"id":196,"from_bus":97,"to_bus":104,"rate_a":2172.0,"in_service":true},{"id":197,"from_bus":97,"to_bus":109,"rate_a":2172.0,"in_service":true},{"id":198,"from_bus":98,"to_bus":102,"rate_a":904.0,"in_service":true},{"id":199,"from_bus":99,"to_bus":101,"rate_a":904.0,"in_service":true},{"id":200,"from_bus":99,"to_bus":104,"rate_a":904.0,"in_service":true},{"id":201,"from_bus":100,"to_bus":103,"rate_a":1808.0,"in_service":true},{"id":202,"from_bus":101,"to_bus":102,"rate_a":904.0,"in_service":true},{"id":203,"from_bus":102,"to_bus":104,"rate_a":2172.0,"in_service":true},{"id":204,"from_bus":102,"to_bus":105,"rate_a":904.0,"in_service":true},{"id":205,"from_bus":102,"to_bus":107,"rate_a":2172.0,"in_service":true},{"id":206,"from_bus":102,"to_bus":119,"rate_a":2172.0,"in_service":true},{"id":207,"from_bus":103,"to_bus":104,"rate_a":904.0,"in_service":true},{"id":208,"from_bus":103,"to_bus":108,"rate_a":904.0,"in_service":true},{"id":209,"from_bus":104,"to_bus":109,"rate_a":904.0,"in_service":true},{"id":210,"from_bus":105,"to_bus":107,"rate_a":904.0,"in_service":true},{"id":211,"from_bus":106,"to_bus":108,"rate_a":904.0,"in_service":true},{"id":212,"from_bus":107,"to_bus":147,"rate_a":904.0,"in_service":true},{"id":213,"from_bus":107,"to_bus":161,"rate_a":2172.0,"in_service":true},{"id":214,"from_bus":108,"to_bus":109,"rate_a":2172.0,"in_service":true},{"id":215,"from_bus":109,"to_bus":110,"rate_a":904.0,"in_service":true},{"id":216,"from_bus":109,"to_bus":111,"rate_a":2172.0,"in_service":true},{"id":217,"from_bus":109,"to_bus":117,"rate_a":904.0,"in_service":true},{"id":218,"from_bus":110,"to_bus":112,"rate_a":904.0,"in_service":true},{"id":219,"from_bus":110,"to_bus":113,"rate_a":904.0,"in_service":true},{"id":220,"from_bus":111,"to_bus":113,"rate_a":904.0,"in_service":true},{"id":221,"from_bus":111,"to_bus":114,"rate_a":904.0,"in_service":true},{"id":222,"from_bus":111,"to_bus":124,"rate_a":2172.0,"in_service":true},{"id":223,"from_bus":112,"to_bus":115,"rate_a":904.0,"in_service":true},{"id":224,"from_bus":113,"to_bus":116,"rate_a":904.0,"in_service":true},{"id":225,"from_bus":113,"to_bus":117,"rate_a":904.0,"in_service":true},{"id":226,"from_bus":114,"to_bus":117,"rate_a":904.0,"in_service":true},{"id":227,"from_bus":116,"to_bus":119,"rate_a":904.0,"in_service":true},{"id":228,"from_bus":117,"to_bus":118,"rate_a":904.0,"in_service":true},{"id":229,"from_bus":117,"to_bus":122,"rate_a":904.0,"in_service":true},{"id":230,"from_bus":119,"to_bus":124,"rate_a":2172.0,"in_service":true},{"id":231,"from_bus":119,"to_bus":126,"rate_a":2172.0,"in_service":true},{"id":232,"from_bus":119,"to_bus":134,"rate_a":2172.0,"in_service":true},{"id":233,"from_bus":119,"to_bus":173,"rate_a":2172.0,"in_service":true},{"id":234,"from_bus":120,"to_bus":123,"rate_a":904.0,"in_service":true},{"id":235,"from_bus":121,"to_bus":124,"rate_a":904.0,"in_service":true},{"id":236,"from_bus":121,"to_bus":126,"rate_a":904.0,"in_service":true},{"id":237,"from_bus":121,"to_bus":128,"rate_a":904.0,"in_service":true},{"id":238,"from_bus":122,"to_bus":126,"rate_a":904.0,"in_service":true},{"id":239,"from_bus":123,"to_bus":125,"rate_a":904.0,"in_service":true},{"id":240,"from_bus":123,"to_bus":126,"rate_a":904.0,"in_service":true},{"id":241,"from_bus":123,"to_bus":133,"rate_a":904.0,"in_service":true},{"id":242,"from_bus":124,"to_bus":126,"rate_a":2172.0,"in_service":true},{"id":243,"from_bus":126,"to_bus":127,"rate_a":904.0,"in_service":true},{"id":244,"from_bus":126,"to_bus":130,"rate_a":2172.0,"in_service":true},{"id":245,"from_bus":127,"to_bus":130,"rate_a":904.0,"in_service":true},{"id":246,"from_bus":127,"to_bus":131,"rate_a":904.0,"in_service":true},{"id":247,"from_bus":128,"to_bus":131,"rate_a":904.0,"in_service":true},{"id":248,"from_bus":129,"to_bus":132,"rate_a":904.0,"in_service":true},{"id":249,"from_bus":130,"to_bus":131,"rate_a":904.0,"in_service":true},{"id":250,"from_bus":130,"to_bus":133,"rate_a":904.0,"in_service":true},{"id":251,"from_bus":130,"to_bus":136,"rate_a":2172.0,"in_service":true},{"id":252,"from_bus":131,"to_bus":135,"rate_a":904.0,"in_service":true},{"id":253,"from_bus":131,"to_bus":136,"rate_a":904.0,"in_service":true},{"id":254,"from_bus":132,"to_bus":135,"rate_a":904.0,"in_service":true},{"id":255,"from_bus":132,"to_bus":136,"rate_a":904.0,"in_service":true},{"id":256,"from_bus":132,"to_bus":139,"rate_a":904.0,"in_service":true},{"id":257,"from_bus":133,"to_bus":134,"rate_a":2172.0,"in_service":true},{"id":258,"from_bus":133,"to_bus":137,"rate_a":904.0,"in_service":true},{"id":259,"from_bus":133,"to_bus":138,"rate_a":904.0,"in_service":true},{"id":260,"from_bus":133,"to_bus":142,"rate_a":904.0,"in_service":true},{"id":261,"from_bus":134,"to_bus":136,"rate_a":2172.0,"in_service":true},{"id":262,"from_bus":134,"to_bus":137,"rate_a":4344.0,"in_service":true},{"id":263,"from_bus":134,"to_bus":188,"rate_a":904.0,"in_service":true},{"id":264,"from_bus":134,"to_bus":193,"rate_a":2172.0,"in_service":true},{"id":265,"from_bus":135,"to_bus":139,"rate_a":904.0,"in_service":true},{"id":266,"from_bus":135,"to_bus":141,"rate_a":904.0,"in_service":true},{"id":267,"from_bus":135,"to_bus":144,"rate_a":904.0,"in_service":true},{"id":268,"from_bus":136,"to_bus":141,"rate_a":904.0,"in_service":true},{"id":269,"from_bus":136,"to_bus":143,"rate_a":904.0,"in_service":true},{"id":270,"from_bus":137,"to_bus":142,"rate_a":904.0,"in_service":true},{"id":271,"from_bus":138,"to_bus":140,"rate_a":904.0,"in_service":true},{"id":272,"from_bus":140,"to_bus":141,"rate_a":904.0,"in_service":true},{"id":273,"from_bus":141,"to_bus":143,"rate_a":904.0,"in_service":true},{"id":274,"from_bus":143,"to_bus":144,"rate_a":904.0,"in_service":true},{"id":275,"from_bus":143,"to_bus":145,"rate_a":904.0,"in_service":true},{"id":276,"from_bus":146,"to_bus":149,"rate_a":904.0,"in_service":true},{"id":277,"from_bus":148,"to_bus":149,"rate_a":904.0,"in_service":true},{"id":278,"from_bus":148,"to_bus":154,"rate_a":904.0,"in_service":true},{"id":279,"from_bus":149,"to_bus":152,"rate_a":2172.0,"in_service":true},{"id":280,"from_bus":149,"to_bus":155,"rate_a":904.0,"in_service":true},{"id":281,"from_bus":150,"to_bus":151,"rate_a":2172.0,"in_service":true},{"id":282,"from_bus":150,"to_bus":158,"rate_a":904.0,"in_service":true},{"id":283,"from_bus":151,"to_bus":152,"rate_a":2172.0,"in_service":true},{"id":284,"from_bus":151,"to_bus":158,"rate_a":904.0,"in_service":true},{"id":285,"from_bus":151,"to_bus":166,"rate_a":2172.0,"in_service":true},{"id":286,"from_bus":152,"to_bus":154,"rate_a":904.0,"in_service":true},{"id":287,"from_bus":152,"to_bus":155,"rate_a":904.0,"in_service":true},{"id":288,"from_bus":152,"to_bus":157,"rate_a":904.0,"in_service":true},{"id":289,"from_bus":152,"to_bus":160,"rate_a":904.0,"in_service":true},{"id":290,"from_bus":152,"to_bus":161,"rate_a":2172.0,"in_service":true},{"id":291,"from_bus":152,"to_bus":168,"rate_a":2172.0,"in_service":true},{"id":292,"from_bus":153,"to_bus":158,"rate_a":904.0,"in_service":true},{"id":293,"from_bus":153,"to_bus":159,"rate_a":904.0,"in_service":true},{"id":294,"from_bus":155,"to_bus":159,"rate_a":904.0,"in_service":true},{"id":295,"from_bus":156,"to_bus":159,"rate_a":1808.0,"in_service":true},{"id":296,"from_bus":157,"to_bus":160,"rate_a":904.0,"in_service":true},{"id":297,"from_bus":158,"to_bus":166,"rate_a":904.0,"in_service":true},{"id":298,"from_bus":158,"to_bus":167,"rate_a":904.0,"in_service":true},{"id":299,"from_bus":159,"to_bus":163,"rate_a":2172.0,"in_service":true},{"id":300,"from_bus":159,"to_bus":165,"rate_a":2172.0,"in_service":true},{"id":301,"from_bus":160,"to_bus":161,"rate_a":904.0,"in_service":true},{"id":302,"from_bus":160,"to_bus":168,"rate_a":904.0,"in_service":true},{"id":303,"from_bus":161,"to_bus":164,"rate_a":904.0,"in_service":true},{"id":304,"from_bus":161,"to_bus":168,"rate_a":2172.0,"in_service":true},{"id":305,"from_bus":161,"to_bus":173,"rate_a":2172.0,"in_service":true},{"id":306,"from_bus":162,"to_bus":164,"rate_a":904.0,"in_service":true},{"id":307,"from_bus":162,"to_bus":169,"rate_a":904.0,"in_service":true},{"id":308,"from_bus":163,"to_bus":168,"rate_a":2172.0,"in_service":true},{"id":309,"from_bus":163,"to_bus":170,"rate_a":904.0,"in_service":true},{"id":310,"from_bus":165,"to_bus":166,"rate_a":2172.0,"in_service":true},{"id":311,"from_bus":165,"to_bus":167,"rate_a":904.0,"in_service":true},{"id":312,"from_bus":165,"to_bus":172,"rate_a":904.0,"in_service":true},{"id":313,"from_bus":166,"to_bus":167,"rate_a":2172.0,"in_service":true},{"id":314,"from_bus":167,"to_bus":175,"rate_a":2172.0,"in_service":true},{"id":315,"from_bus":167,"to_bus":181,"rate_a":2172.0,"in_service":true},{"id":316,"from_bus":168,"to_bus":170,"rate_a":904.0,"in_service":true},{"id":317,"from_bus":168,"to_bus":175,"rate_a":14580.0,"in_service":true},{"id":318,"from_bus":168,"to_bus":176,"rate_a":904.0,"in_service":true},{"id":319,"from_bus":169,"to_bus":173,"rate_a":904.0,"in_service":true},{"id":320,"from_bus":170,"to_bus":172,"rate_a":904.0,"in_service":true},{"id":321,"from_bus":170,"to_bus":177,"rate_a":904.0,"in_service":true},{"id":322,"from_bus":171,"to_bus":173,"rate_a":2172.0,"in_service":true},{"id":323,"from_bus":172,"to_bus":175,"rate_a":904.0,"in_service":true},{"id":324,"from_bus":172,"to_bus":178,"rate_a":904.0,"in_service":true},{"id":325,"from_bus":172,"to_bus":179,"rate_a":904.0,"in_service":true},{"id":326,"from_bus":172,"to_bus":181,"rate_a":904.0,"in_service":true},{"id":327,"from_bus":173,"to_bus":174,"rate_a":2172.0,"in_service":true},{"id":328,"from_bus":173,"to_bus":180,"rate_a":904.0,"in_service":true},{"id":329,"from_bus":173,"to_bus":193,"rate_a":2172.0,"in_service":true},{"id":330,"from_bus":174,"to_bus":176,"rate_a":2172.0,"in_service":true},{"id":331,"from_bus":174,"to_bus":180,"rate_a":904.0,"in_service":true},{"id":332,"from_bus":175,"to_bus":179,"rate_a":2172.0,"in_service":true},{"id":333,"from_bus":175,"to_bus":181,"rate_a":2172.0,"in_service":true},{"id":334,"from_bus":175,"to_bus":184,"rate_a":904.0,"in_service":true},{"id":335,"from_bus":176,"to_bus":177,"rate_a":2172.0,"in_service":true},{"id":336,"from_bus":176,"to_bus":189,"rate_a":904.0,"in_service":true},{"id":337,"from_bus":176,"to_bus":190,"rate_a":2172.0,"in_service":true},{"id":338,"from_bus":177,"to_bus":178,"rate_a":904.0,"in_service":true},{"id":339,"from_bus":177,"to_bus":181,"rate_a":2172.0,"in_service":true},{"id":340,"from_bus":177,"to_bus":182,"rate_a":2172.0,"in_service":true},{"id":341,"from_bus":177,"to_bus":183,"rate_a":2172.0,"in_service":true},{"id":342,"from_bus":178,"to_bus":182,"rate_a":904.0,"in_service":true},{"id":343,"from_bus":178,"to_bus":183,"rate_a":904.0,"in_service":true},{"id":344,"from_bus":179,"to_bus":181,"rate_a":2172.0,"in_service":true},{"id":345,"from_bus":179,"to_bus":184,"rate_a":2172.0,"in_service":true},{"id":346,"from_bus":179,"to_bus":185,"rate_a":904.0,"in_service":true},{"id":347,"from_bus":180,"to_bus":188,"rate_a":904.0,"in_service":true},{"id":348,"from_bus":180,"to_bus":190,"rate_a":904.0,"in_service":true},{"id":349,"from_bus":181,"to_bus":185,"rate_a":904.0,"in_service":true},{"id":350,"from_bus":181,"to_bus":186,"rate_a":2172.0,"in_service":true},{"id":351,"from_bus":183,"to_bus":190,"rate_a":2172.0,"in_service":true},{"id":352,"from_bus":186,"to_bus":187,"rate_a":2172.0,"in_service":true},{"id":353,"from_bus":188,"to_bus":193,"rate_a":904.0,"in_service":true},{"id":354,"from_bus":189,"to_bus":190,"rate_a":904.0,"in_service":true},{"id":355,"from_bus":189,"to_bus":191,"rate_a":904.0,"in_service":true},{"id":356,"from_bus":189,"to_bus":192,"rate_a":904.0,"in_service":true},{"id":357,"from_bus":190,"to_bus":192,"rate_a":904.0,"in_service":true},{"id":358,"from_bus":191,"to_bus":192,"rate_a":904.0,"in_service":true},{"id":359,"from_bus":50,"to_bus":51,"rate_a":2172.0,"in_service":true},{"id":360,"from_bus":35,"to_bus":40,"rate_a":904.0,"in_service":true},{"id":361,"from_bus":52,"to_bus":54,"rate_a":904.0,"in_service":true},{"id":362,"from_bus":138,"to_bus":142,"rate_a":904.0,"in_service":true},{"id":363,"from_bus":138,"to_bus":142,"rate_a":904.0,"in_service":true},{"id":364,"from_bus":25,"to_bus":32,"rate_a":2172.0,"in_service":true},{"id":365,"from_bus":20,"to_bus":22,"rate_a":904.0,"in_service":true},{"id":366,"from_bus":9,"to_bus":13,"rate_a":904.0,"in_service":true},{"id":367,"from_bus":24,"to_bus":26,"rate_a":904.0,"in_service":true},{"id":368,"from_bus":45,"to_bus":48,"rate_a":904.0,"in_service":true},{"id":369,"from_bus":90,"to_bus":92,"rate_a":904.0,"in_service":true},{"id":370,"from_bus":118,"to_bus":124,"rate_a":904.0,"in_service":true},{"id":371,"from_bus":118,"to_bus":124,"rate_a":904.0,"in_service":true},{"id":372,"from_bus":189,"to_bus":192,"rate_a":904.0,"in_service":true},{"id":373,"from_bus":45,"to_bus":48,"rate_a":904.0,"in_service":true},{"id":374,"from_bus":25,"to_bus":26,"rate_a":904.0,"in_service":true},{"id":375,"from_bus":54,"to_bus":61,"rate_a":904.0,"in_service":true},{"id":376,"from_bus":61,"to_bus":62,"rate_a":904.0,"in_service":true},{"id":377,"from_bus":61,"to_bus":62,"rate_a":904.0,"in_service":true},{"id":378,"from_bus":9,"to_bus":13,"rate_a":904.0,"in_service":true},{"id":379,"from_bus":15,"to_bus":16,"rate_a":904.0,"in_service":true},{"id":380,"from_bus":101,"to_bus":109,"rate_a":904.0,"in_service":true},{"id":381,"from_bus":155,"to_bus":157,"rate_a":904.0,"in_service":true},{"id":382,"from_bus":53,"to_bus":57,"rate_a":2172.0,"in_service":true},{"id":383,"from_bus":13,"to_bus":15,"rate_a":904.0,"in_service":true},{"id":384,"from_bus":98,"to_bus":99,"rate_a":904.0,"in_service":true},{"id":385,"from_bus":132,"to_bus":139,"rate_a":904.0,"in_service":true}],"results":[{"outage_branch":67,"outage_from_bus":28,"outage_from_name":"양평","outage_to_bus":80,"outage_to_name":"태백","outage_base_loading_pct":52.0068088785,"status":"LIMIT_VIOLATION","component_count":1,"component_sizes":null,"converged":true,"max_loading_pct":230.0321132587,"worst_branch":170,"worst_from_bus":82,"worst_from_name":"울진","worst_to_bus":86,"worst_to_name":"영주","overloaded_branch_count":29,"min_voltage_pu":0.731741019,"min_voltage_bus":67,"min_voltage_name":"양구","voltage_violation_count":31,"max_voltage_violation_pu":0.1829865178,"ac_loss_mw":2828.1640107742,"message":null}],"default_branch":67};
+    const SVG_NS = "http://www.w3.org/2000/svg";
+    const statusFilter = document.getElementById("status-filter");
+    const scenarioSelect = document.getElementById("scenario-select");
+    const prevButton = document.getElementById("prev-button");
+    const nextButton = document.getElementById("next-button");
+    const baseBranchesGroup = document.getElementById("base-branches");
+    const baseBusesGroup = document.getElementById("base-buses");
+    const highlightsGroup = document.getElementById("highlights");
+    const labelsGroup = document.getElementById("labels");
+
+    const busById = new Map(DATA.buses.map((bus) => [Number(bus.id), bus]));
+    const branchById = new Map(
+      DATA.branches.map((branch) => [Number(branch.id), branch])
+    );
+
+    const longitudeValues = DATA.buses.map((bus) => Number(bus.longitude));
+    const latitudeValues = DATA.buses.map((bus) => Number(bus.latitude));
+    const minLongitude = Math.min(...longitudeValues);
+    const maxLongitude = Math.max(...longitudeValues);
+    const minLatitude = Math.min(...latitudeValues);
+    const maxLatitude = Math.max(...latitudeValues);
+    const mapPaddingX = 46;
+    const mapPaddingY = 40;
+    const mapWidth = 780;
+    const mapHeight = 900;
+
+    function xPosition(longitude) {
+      return mapPaddingX
+        + ((Number(longitude) - minLongitude) / (maxLongitude - minLongitude))
+        * (mapWidth - 2 * mapPaddingX);
+    }
+
+    function yPosition(latitude) {
+      return mapPaddingY
+        + ((maxLatitude - Number(latitude)) / (maxLatitude - minLatitude))
+        * (mapHeight - 2 * mapPaddingY);
+    }
+
+    function createSvgElement(tagName, attributes = {}) {
+      const element = document.createElementNS(SVG_NS, tagName);
+      for (const [key, value] of Object.entries(attributes)) {
+        element.setAttribute(key, String(value));
+      }
+      return element;
+    }
+
+    function lineForBranch(branch, className) {
+      const fromBus = busById.get(Number(branch.from_bus));
+      const toBus = busById.get(Number(branch.to_bus));
+      if (!fromBus || !toBus) {
+        return null;
+      }
+
+      const line = createSvgElement("line", {
+        x1: xPosition(fromBus.longitude),
+        y1: yPosition(fromBus.latitude),
+        x2: xPosition(toBus.longitude),
+        y2: yPosition(toBus.latitude),
+        class: className,
+      });
+      const title = createSvgElement("title");
+      title.textContent =
+        "B" + branch.id + " " + fromBus.name + " - " + toBus.name;
+      line.appendChild(title);
+      return line;
+    }
+
+    function drawBaseNetwork() {
+      for (const branch of DATA.branches) {
+        if (!branch.in_service) {
+          continue;
+        }
+        const line = lineForBranch(branch, "base-branch");
+        if (line) {
+          baseBranchesGroup.appendChild(line);
+        }
+      }
+
+      for (const bus of DATA.buses) {
+        const circle = createSvgElement("circle", {
+          cx: xPosition(bus.longitude),
+          cy: yPosition(bus.latitude),
+          r: 2.5,
+          class: "base-bus",
+        });
+        const title = createSvgElement("title");
+        title.textContent =
+          "Bus " + bus.id + " " + bus.name + " (" + bus.base_kv + " kV)";
+        circle.appendChild(title);
+        baseBusesGroup.appendChild(circle);
+      }
+    }
+
+    function numberOrNull(value) {
+      if (value === null || value === undefined || value === "") {
+        return null;
+      }
+      const number = Number(value);
+      return Number.isFinite(number) ? number : null;
+    }
+
+    function formatNumber(value, digits, suffix = "") {
+      const number = numberOrNull(value);
+      return number === null ? "-" : number.toFixed(digits) + suffix;
+    }
+
+    function statusLabel(status) {
+      const labels = {
+        OK: "한계 내",
+        LIMIT_VIOLATION: "한계 위반",
+        ISLANDING: "계통 분리",
+        NON_CONVERGED: "비수렴",
+        ERROR: "계산 오류",
+      };
+      return labels[status] || status || "-";
+    }
+
+    function statusClass(status) {
+      if (status === "OK") {
+        return "status-ok";
+      }
+      if (status === "LIMIT_VIOLATION") {
+        return "status-warning";
+      }
+      return "status-danger";
+    }
+
+    function currentFilteredResults() {
+      const selectedStatus = statusFilter.value;
+      if (selectedStatus === "ALL") {
+        return DATA.results;
+      }
+      return DATA.results.filter((row) => row.status === selectedStatus);
+    }
+
+    function rebuildScenarioOptions(preferredBranch = null) {
+      const filtered = currentFilteredResults();
+      scenarioSelect.replaceChildren();
+
+      for (const row of filtered) {
+        const option = document.createElement("option");
+        option.value = String(row.outage_branch);
+        option.textContent =
+          "[" + statusLabel(row.status) + "] B" + row.outage_branch + " "
+          + row.outage_from_name + " → " + row.outage_to_name;
+        scenarioSelect.appendChild(option);
+      }
+
+      if (preferredBranch !== null) {
+        const matchingOption = Array.from(scenarioSelect.options).find(
+          (option) => Number(option.value) === Number(preferredBranch)
+        );
+        if (matchingOption) {
+          scenarioSelect.value = matchingOption.value;
+        }
+      }
+
+      if (scenarioSelect.options.length > 0) {
+        renderSelectedScenario();
+      } else {
+        clearDashboard();
+      }
+    }
+
+    function selectedResult() {
+      const branchNumber = Number(scenarioSelect.value);
+      return DATA.results.find(
+        (row) => Number(row.outage_branch) === branchNumber
+      );
+    }
+
+    function addMapLabel(bus, text, dx, dy) {
+      const label = createSvgElement("text", {
+        x: xPosition(bus.longitude) + dx,
+        y: yPosition(bus.latitude) + dy,
+        class: "map-label",
+      });
+      label.textContent = text;
+      labelsGroup.appendChild(label);
+    }
+
+    function renderMap(row) {
+      highlightsGroup.replaceChildren();
+      labelsGroup.replaceChildren();
+
+      const outageBranch = branchById.get(Number(row.outage_branch));
+      if (outageBranch) {
+        const outageLine = lineForBranch(outageBranch, "outage-line");
+        if (outageLine) {
+          highlightsGroup.appendChild(outageLine);
+        }
+        const outageFrom = busById.get(Number(outageBranch.from_bus));
+        if (outageFrom) {
+          addMapLabel(
+            outageFrom,
+            "탈락 B" + row.outage_branch + " "
+              + row.outage_from_name + "–" + row.outage_to_name,
+            8,
+            -10
+          );
+        }
+      }
+
+      const worstBranchNumber = numberOrNull(row.worst_branch);
+      const worstBranch = branchById.get(worstBranchNumber);
+      if (worstBranch) {
+        const worstLine = lineForBranch(worstBranch, "worst-line");
+        if (worstLine) {
+          highlightsGroup.appendChild(worstLine);
+        }
+        const worstFrom = busById.get(Number(worstBranch.from_bus));
+        if (worstFrom) {
+          addMapLabel(
+            worstFrom,
+            "최대 " + formatNumber(row.max_loading_pct, 2, "%"),
+            8,
+            18
+          );
+        }
+      }
+
+      const minVoltageBusId = numberOrNull(row.min_voltage_bus);
+      const minVoltageBus = busById.get(minVoltageBusId);
+      if (minVoltageBus) {
+        const marker = createSvgElement("circle", {
+          cx: xPosition(minVoltageBus.longitude),
+          cy: yPosition(minVoltageBus.latitude),
+          r: 8,
+          class: "voltage-bus",
+        });
+        highlightsGroup.appendChild(marker);
+        addMapLabel(
+          minVoltageBus,
+          "최저 " + formatNumber(row.min_voltage_pu, 5, " pu"),
+          11,
+          4
+        );
+      }
+    }
+
+    function setText(id, value) {
+      document.getElementById(id).textContent = value;
+    }
+
+    function renderSelectedScenario() {
+      const row = selectedResult();
+      if (!row) {
+        clearDashboard();
+        return;
+      }
+
+      const statusText = statusLabel(row.status);
+      const overloadCount = numberOrNull(row.overloaded_branch_count);
+      const voltageViolationCount = numberOrNull(row.voltage_violation_count);
+      const violationText =
+        (overloadCount === null ? "-" : overloadCount + "선로")
+        + " / "
+        + (voltageViolationCount === null ? "-" : voltageViolationCount + "Bus");
+
+      setText("metric-status", statusText);
+      setText("metric-loading", formatNumber(row.max_loading_pct, 2, "%"));
+      setText("metric-voltage", formatNumber(row.min_voltage_pu, 5, " pu"));
+      setText("metric-violations", violationText);
+
+      setText(
+        "detail-title",
+        "B" + row.outage_branch + " "
+          + row.outage_from_name + " → " + row.outage_to_name
+      );
+      const detailStatus = document.getElementById("detail-status");
+      detailStatus.textContent = statusText;
+      detailStatus.className = "status-line " + statusClass(row.status);
+
+      setText(
+        "detail-base-loading",
+        formatNumber(row.outage_base_loading_pct, 2, "%")
+      );
+
+      if (numberOrNull(row.worst_branch) !== null) {
+        setText(
+          "detail-worst-branch",
+          "B" + row.worst_branch + " "
+            + row.worst_from_name + " → " + row.worst_to_name + " / "
+            + formatNumber(row.max_loading_pct, 2, "%")
+        );
+      } else {
+        setText("detail-worst-branch", "-");
+      }
+
+      setText(
+        "detail-overloads",
+        overloadCount === null ? "-" : overloadCount + "개"
+      );
+
+      if (numberOrNull(row.min_voltage_bus) !== null) {
+        setText(
+          "detail-min-voltage",
+          "Bus " + row.min_voltage_bus + " " + row.min_voltage_name + " / "
+            + formatNumber(row.min_voltage_pu, 5, " pu")
+        );
+      } else {
+        setText("detail-min-voltage", "-");
+      }
+
+      setText(
+        "detail-voltage-violations",
+        voltageViolationCount === null ? "-" : voltageViolationCount + "개"
+      );
+      setText(
+        "detail-islanding",
+        row.status === "ISLANDING"
+          ? row.component_count + "개 계통 (" + row.component_sizes + ")"
+          : "없음"
+      );
+      setText("detail-loss", formatNumber(row.ac_loss_mw, 2, " MW"));
+
+      renderMap(row);
+    }
+
+    function clearDashboard() {
+      for (const id of [
+        "metric-status",
+        "metric-loading",
+        "metric-voltage",
+        "metric-violations",
+        "detail-title",
+        "detail-status",
+        "detail-base-loading",
+        "detail-worst-branch",
+        "detail-overloads",
+        "detail-min-voltage",
+        "detail-voltage-violations",
+        "detail-islanding",
+        "detail-loss",
+      ]) {
+        setText(id, "-");
+      }
+      highlightsGroup.replaceChildren();
+      labelsGroup.replaceChildren();
+    }
+
+    function moveSelection(offset) {
+      const optionCount = scenarioSelect.options.length;
+      if (optionCount === 0) {
+        return;
+      }
+      const nextIndex =
+        (scenarioSelect.selectedIndex + offset + optionCount) % optionCount;
+      scenarioSelect.selectedIndex = nextIndex;
+      renderSelectedScenario();
+    }
+
+    statusFilter.addEventListener("change", () => {
+      rebuildScenarioOptions();
+    });
+    scenarioSelect.addEventListener("change", renderSelectedScenario);
+    prevButton.addEventListener("click", () => moveSelection(-1));
+    nextButton.addEventListener("click", () => moveSelection(1));
+
+    drawBaseNetwork();
+    statusFilter.value = "LIMIT_VIOLATION";
+    rebuildScenarioOptions(DATA.default_branch);
+  </script>
+</body>
+</html>
