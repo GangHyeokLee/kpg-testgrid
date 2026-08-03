@@ -16,9 +16,10 @@ from pypower.api import ppoption, runpf
 
 
 ROOT = Path(__file__).resolve().parent
-CASE_FILE = ROOT / "kpg193_v2_0" / "network" / "m" / "KPG193_ver2_0.m"
+REPOSITORY_ROOT = ROOT.parents[1]
+CASE_FILE = REPOSITORY_ROOT / "kpg193_v2_0" / "network" / "m" / "KPG193_ver2_0.m"
 BUS_METADATA_FILE = (
-    ROOT
+    REPOSITORY_ROOT
     / "kpg193_v2_0"
     / "network"
     / "metadata"

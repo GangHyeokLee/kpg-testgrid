@@ -12,11 +12,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import pandas as pd
 
-from kpg_day01 import (
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from day01.kpg_day01 import (
     BUS_METADATA_FILE,
     CASE_FILE,
     load_matpower_matrix,

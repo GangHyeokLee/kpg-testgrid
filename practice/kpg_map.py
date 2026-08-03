@@ -28,7 +28,7 @@ if not hasattr(np, "in1d"):
 
 from pypower.api import ppoption, runpf
 
-from kpg_day01 import (
+from day01.kpg_day01 import (
     BUS_METADATA_FILE,
     CASE_FILE,
     add_fixed_hvdc_as_dummy_generators,

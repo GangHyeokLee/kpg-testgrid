@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import sys
 import warnings
 from pathlib import Path
 
@@ -28,7 +29,9 @@ import numpy as np
 import pandas as pd
 from pypower.api import ppoption, runpf
 
-from kpg_day01 import (
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from day01.kpg_day01 import (
     BUS_METADATA_FILE,
     CASE_FILE,
     add_fixed_hvdc_as_dummy_generators,
