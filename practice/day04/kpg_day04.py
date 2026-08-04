@@ -2,7 +2,8 @@
 
 Day 3에서는 사람이 정한 단순 참여규칙으로 발전량을 배분했다. Day 4에서는
 발전비용, 발전기 Pmin/Pmax, 선로 RATE_A를 사용해 DC-OPF가 발전기 Pg를
-직접 결정하게 한다.
+직접 결정하게 한다. 이어서 같은 Pg를 AC-PF에 적용해 전압, AC 선로 MVA
+부하율, 발전기 P/Q 한계와 Slack 발전기의 손실 부담을 재검증한다.
 
 예:
     python kpg_day04.py
@@ -45,12 +46,21 @@ except ModuleNotFoundError:
 
 # MATPOWER/PYPOWER 열 번호의 Python 0-based index.
 BUS_I = 0
+BUS_TYPE = 1
 PD = 2
 QD = 3
+VM = 7
+VMAX = 11
+VMIN = 12
 LAM_P = 13
+
+REF = 3
 
 GEN_BUS = 0
 PG = 1
+QG = 2
+QMAX = 3
+QMIN = 4
 GEN_STATUS = 7
 PMAX = 8
 PMIN = 9
@@ -60,9 +70,12 @@ T_BUS = 1
 RATE_A = 5
 BR_STATUS = 10
 PF = 13
+QF = 14
 PT = 15
+QT = 16
 
 BINDING_THRESHOLD_PCT = 99.9
+LIMIT_TOLERANCE = 1e-4
 DEFAULT_SCALES = [100.0, 105.0]
 
 
@@ -132,7 +145,7 @@ def prepare_fixed_hvdc_for_opf(
     return prepared_gen, np.vstack([gencost, zero_cost_rows]), dummy_count
 
 
-def branch_loadings(result_branch: np.ndarray) -> np.ndarray:
+def dc_branch_loadings(result_branch: np.ndarray) -> np.ndarray:
     """DC 유효전력 흐름을 RATE_A로 나눈 선로 부하율을 계산한다."""
 
     rate = result_branch[:, RATE_A]
@@ -143,6 +156,22 @@ def branch_loadings(result_branch: np.ndarray) -> np.ndarray:
             np.abs(result_branch[valid, PF]),
             np.abs(result_branch[valid, PT]),
         )
+        / rate[valid]
+        * 100.0
+    )
+    return loading
+
+
+def ac_branch_loadings(result_branch: np.ndarray) -> np.ndarray:
+    """AC 양단 피상전력 중 큰 값을 RATE_A로 나눈 부하율을 계산한다."""
+
+    rate = result_branch[:, RATE_A]
+    valid = (result_branch[:, BR_STATUS] > 0) & (rate > 0)
+    loading = np.full(len(result_branch), np.nan)
+    from_mva = np.hypot(result_branch[:, PF], result_branch[:, QF])
+    to_mva = np.hypot(result_branch[:, PT], result_branch[:, QT])
+    loading[valid] = (
+        np.maximum(from_mva[valid], to_mva[valid])
         / rate[valid]
         * 100.0
     )
@@ -174,6 +203,185 @@ def print_top_redispatch(
             f"{optimized_gen[index, PG]:>10.1f}  "
             f"{change[index]:>+10.1f} MW"
         )
+
+
+def validate_ac_result(
+    scenario_bus: np.ndarray,
+    base_gen: np.ndarray,
+    branch: np.ndarray,
+    optimized_gen: np.ndarray,
+    original_gen_count: int,
+    bus_names: dict[int, str],
+) -> None:
+    """DC-OPF의 Pg를 AC-PF에 적용하고 AC 계통 한계를 재검증한다.
+
+    AC-PF는 발전기 Q 한계를 자동으로 안전 판정하지 않는다. 따라서 수렴
+    이후 전압, 선로 MVA 부하율, 발전기 P/Q 한계를 별도로 검사한다.
+    AC 손실은 REF(Slack) Bus의 발전기가 자동으로 부담한다.
+    """
+
+    ac_gen = base_gen.copy()
+    ac_gen[:, PG] = optimized_gen[:, PG]
+    ac_case = {
+        "version": "2",
+        "baseMVA": 100.0,
+        "bus": scenario_bus.copy(),
+        "gen": ac_gen,
+        "branch": branch.copy(),
+    }
+    ac_results, converged = runpf(
+        ac_case,
+        ppoption(VERBOSE=0, OUT_ALL=0, PF_ALG=1),
+    )
+
+    print("\n[DC-OPF 결과의 AC 재검증]")
+    print(f"AC-PF 수렴          : {bool(converged)}")
+    if not converged:
+        print("최종 판정           : 실패 (AC-PF 미수렴)")
+        return
+
+    result_bus = ac_results["bus"]
+    result_gen = ac_results["gen"]
+    result_branch = ac_results["branch"]
+
+    voltage_violation = (
+        (result_bus[:, VM] < result_bus[:, VMIN] - LIMIT_TOLERANCE)
+        | (result_bus[:, VM] > result_bus[:, VMAX] + LIMIT_TOLERANCE)
+    )
+    voltage_violation_indices = np.flatnonzero(voltage_violation)
+    min_voltage_index = int(np.argmin(result_bus[:, VM]))
+    max_voltage_index = int(np.argmax(result_bus[:, VM]))
+
+    loading = ac_branch_loadings(result_branch)
+    rated = np.flatnonzero(~np.isnan(loading))
+    worst_index = int(rated[np.argmax(loading[rated])])
+    overloaded_indices = np.flatnonzero(
+        loading > 100.0 + LIMIT_TOLERANCE
+    )
+    from_bus = int(result_branch[worst_index, F_BUS])
+    to_bus = int(result_branch[worst_index, T_BUS])
+
+    generator_indices = np.arange(len(result_gen))
+    active = result_gen[:, GEN_STATUS] > 0
+    conventional = generator_indices < original_gen_count
+    active_conventional = active & conventional
+    p_violation = active_conventional & (
+        (result_gen[:, PG] > result_gen[:, PMAX] + LIMIT_TOLERANCE)
+        | (result_gen[:, PG] < result_gen[:, PMIN] - LIMIT_TOLERANCE)
+    )
+    q_violation = active & (
+        (result_gen[:, QG] > result_gen[:, QMAX] + LIMIT_TOLERANCE)
+        | (result_gen[:, QG] < result_gen[:, QMIN] - LIMIT_TOLERANCE)
+    )
+    p_violation_indices = np.flatnonzero(p_violation)
+    q_violation_indices = np.flatnonzero(q_violation)
+
+    reference_bus_ids = scenario_bus[
+        scenario_bus[:, BUS_TYPE] == REF, BUS_I
+    ].astype(int)
+    slack_generators = active_conventional & np.isin(
+        result_gen[:, GEN_BUS].astype(int),
+        reference_bus_ids,
+    )
+    slack_pg_change = float(
+        (result_gen[slack_generators, PG] - optimized_gen[slack_generators, PG]).sum()
+    )
+    slack_p_violation_count = int(np.sum(p_violation & slack_generators))
+
+    net_demand = float(result_bus[:, PD].sum())
+    ac_loss = float(result_gen[:, PG].sum() - net_demand)
+
+    min_bus = int(result_bus[min_voltage_index, BUS_I])
+    max_bus = int(result_bus[max_voltage_index, BUS_I])
+    print(
+        f"전압 범위           : {result_bus[min_voltage_index, VM]:.5f} pu "
+        f"(B{min_bus} {bus_names.get(min_bus, min_bus)}) ~ "
+        f"{result_bus[max_voltage_index, VM]:.5f} pu "
+        f"(B{max_bus} {bus_names.get(max_bus, max_bus)})"
+    )
+    print(f"전압 위반 Bus      : {len(voltage_violation_indices)}개")
+    print(
+        f"최대 AC 선로 부하율: {loading[worst_index]:.2f}% "
+        f"(Branch {worst_index + 1}: "
+        f"B{from_bus} {bus_names.get(from_bus, from_bus)} → "
+        f"B{to_bus} {bus_names.get(to_bus, to_bus)})"
+    )
+    print(f"AC 선로 과부하     : {len(overloaded_indices)}개")
+    print(f"발전기 P 한계 위반 : {len(p_violation_indices)}개 (기존 발전기)")
+    print(
+        f"Slack Bus Pg 변화  : {slack_pg_change:+,.1f} MW / "
+        f"P 한계 위반 {slack_p_violation_count}개"
+    )
+    print(
+        f"발전기 Q 한계 위반 : {len(q_violation_indices)}개 "
+        "(HVDC 더미 포함)"
+    )
+    print(f"AC 유효전력 손실   : {ac_loss:,.1f} MW")
+
+    if len(voltage_violation_indices):
+        print("  전압 위반 예시:")
+        for index in voltage_violation_indices[:3]:
+            bus_id = int(result_bus[index, BUS_I])
+            print(
+                f"    B{bus_id} {bus_names.get(bus_id, bus_id)}: "
+                f"{result_bus[index, VM]:.5f} pu "
+                f"(허용 {result_bus[index, VMIN]:.3f}~"
+                f"{result_bus[index, VMAX]:.3f})"
+            )
+
+    if len(overloaded_indices):
+        print("  선로 과부하 상위:")
+        order = overloaded_indices[
+            np.argsort(loading[overloaded_indices])[::-1]
+        ]
+        for index in order[:3]:
+            f_bus = int(result_branch[index, F_BUS])
+            t_bus = int(result_branch[index, T_BUS])
+            print(
+                f"    Branch {index + 1}: "
+                f"B{f_bus} {bus_names.get(f_bus, f_bus)} → "
+                f"B{t_bus} {bus_names.get(t_bus, t_bus)}  "
+                f"{loading[index]:.2f}%"
+            )
+
+    if len(p_violation_indices):
+        print("  P 한계 위반 예시:")
+        for index in p_violation_indices[:3]:
+            bus_id = int(result_gen[index, GEN_BUS])
+            print(
+                f"    G{index + 1} B{bus_id} {bus_names.get(bus_id, bus_id)}: "
+                f"Pg={result_gen[index, PG]:.1f} MW "
+                f"(허용 {result_gen[index, PMIN]:.1f}~"
+                f"{result_gen[index, PMAX]:.1f})"
+            )
+
+    if len(q_violation_indices):
+        print("  Q 한계 위반 예시:")
+        for index in q_violation_indices[:3]:
+            bus_id = int(result_gen[index, GEN_BUS])
+            generator_label = (
+                f"G{index + 1}"
+                if index < original_gen_count
+                else f"HVDC더미{index - original_gen_count + 1}"
+            )
+            print(
+                f"    {generator_label} B{bus_id} "
+                f"{bus_names.get(bus_id, bus_id)}: "
+                f"Qg={result_gen[index, QG]:.1f} Mvar "
+                f"(허용 {result_gen[index, QMIN]:.1f}~"
+                f"{result_gen[index, QMAX]:.1f})"
+            )
+
+    passed = not (
+        len(voltage_violation_indices)
+        or len(overloaded_indices)
+        or len(p_violation_indices)
+        or len(q_violation_indices)
+    )
+    print(
+        "최종 판정           : "
+        + ("통과" if passed else "위반 있음 (AC 보정 필요)")
+    )
 
 
 def run_scenario(
@@ -211,7 +419,7 @@ def run_scenario(
     result_bus = results["bus"]
     result_gen = results["gen"]
     result_branch = results["branch"]
-    loading = branch_loadings(result_branch)
+    loading = dc_branch_loadings(result_branch)
     rated = np.flatnonzero(~np.isnan(loading))
     worst_index = int(rated[np.argmax(loading[rated])])
     from_bus = int(result_branch[worst_index, F_BUS])
@@ -239,9 +447,9 @@ def run_scenario(
     print(f"비용함수 값        : {float(results['f']):,.1f} (원 데이터 단위)")
     print(
         f"최대 선로 부하율   : {loading[worst_index]:.2f}% "
-        f"(B{worst_index + 1} "
-        f"{bus_names.get(from_bus, from_bus)} → "
-        f"{bus_names.get(to_bus, to_bus)})"
+        f"(Branch {worst_index + 1}: "
+        f"B{from_bus} {bus_names.get(from_bus, from_bus)} → "
+        f"B{to_bus} {bus_names.get(to_bus, to_bus)})"
     )
     print(
         f"한계 도달 선로     : "
@@ -260,38 +468,15 @@ def run_scenario(
         bus_names,
         top,
     )
-
-    # 1. AC-PF용 발전기 데이터 준비
-    ac_gen = base_gen.copy()
-
-    # DC-OPF가 결정한 Pg만 AC 계통에 적용
-    ac_gen[:, PG] = results["gen"][:, PG]
-
-    # 2. AC-PF case 구성
-    ac_case = {
-        "version": "2",
-        "baseMVA": 100.0,
-        "bus": scenario_bus.copy(),
-        "gen": ac_gen,
-        "branch": branch.copy(),
-    }
-
-    # 3. AC 조류계산
-    ac_results, converged = runpf(
-        ac_case,
-        ppoption(
-            VERBOSE=0,
-            OUT_ALL=0,
-            PF_ALG=1,
-        ),
+    validate_ac_result(
+        scenario_bus,
+        base_gen,
+        branch,
+        result_gen,
+        original_gen_count,
+        bus_names,
     )
-    # 4. 결과 확인
-    print("\n[DC-OPF 결과의 AC 재검증]")
-    print(f"AC-PF 수렴         : {bool(converged)}")
 
-    if not converged:
-        print("AC-PF가 수렴하지 않아 상세 검사를 중단합니다.")
-        return
 
 def main() -> None:
     args = parse_args()
@@ -333,7 +518,8 @@ def main() -> None:
         "원본 발전비용 사용"
     )
     print("고려: 발전비용·Pmin/Pmax·선로 유효전력 한계")
-    print("생략: 무효전력 Q·전압 크기·AC 손실")
+    print("DC-OPF 생략: 무효전력 Q·전압 크기·AC 손실")
+    print("후속 검증: DC-OPF의 Pg를 AC-PF에 적용해 AC 한계 재확인")
 
     for scale_pct in scales:
         run_scenario(
@@ -349,12 +535,16 @@ def main() -> None:
 
     print("\n[해석 주의]")
     print(
-        "DC-OPF 성공은 DC 근사모델에서 제약을 만족했다는 뜻이다. "
-        "Q·전압·손실과 AC 피상전력 한계까지 안전하다는 뜻은 아니다."
+        "AC 재검증은 DC-OPF와 동일한 Pg를 시작점으로 사용하되, "
+        "AC 손실은 Slack Bus 발전기가 추가로 부담한다."
     )
     print(
         "비용함수와 LMP는 KPG 원본 단위를 그대로 표시하므로 "
         "통화를 임의로 원 또는 달러로 해석하지 않는다."
+    )
+    print(
+        "AC 기본운전점이 통과해도 N-1 안전까지 보장되지는 않는다. "
+        "최종 확인에는 N-1 AC 재검증이 필요하다."
     )
 
 
