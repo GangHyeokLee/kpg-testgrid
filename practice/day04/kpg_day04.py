@@ -18,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from pypower.api import ppoption, rundcopf
+from pypower.api import ppoption, rundcopf, runpf
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -261,6 +261,37 @@ def run_scenario(
         top,
     )
 
+    # 1. AC-PF용 발전기 데이터 준비
+    ac_gen = base_gen.copy()
+
+    # DC-OPF가 결정한 Pg만 AC 계통에 적용
+    ac_gen[:, PG] = results["gen"][:, PG]
+
+    # 2. AC-PF case 구성
+    ac_case = {
+        "version": "2",
+        "baseMVA": 100.0,
+        "bus": scenario_bus.copy(),
+        "gen": ac_gen,
+        "branch": branch.copy(),
+    }
+
+    # 3. AC 조류계산
+    ac_results, converged = runpf(
+        ac_case,
+        ppoption(
+            VERBOSE=0,
+            OUT_ALL=0,
+            PF_ALG=1,
+        ),
+    )
+    # 4. 결과 확인
+    print("\n[DC-OPF 결과의 AC 재검증]")
+    print(f"AC-PF 수렴         : {bool(converged)}")
+
+    if not converged:
+        print("AC-PF가 수렴하지 않아 상세 검사를 중단합니다.")
+        return
 
 def main() -> None:
     args = parse_args()
